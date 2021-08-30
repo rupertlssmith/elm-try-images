@@ -7,6 +7,8 @@ import Browser.Events
 import Color
 import Css
 import Css.Global
+import File exposing (File)
+import File.Select as Select
 import Frame2d exposing (Frame2d)
 import Geometry.Svg
 import Html as H exposing (Html)
@@ -87,6 +89,7 @@ type alias DrawingModel =
     , userSize : VScene
     , zoomLevel : Int
     , fontLevel : Int
+    , imageUrl : Maybe String
     }
 
 
@@ -99,6 +102,9 @@ type Msg
     | EndGesture
     | FontBigger
     | FontSmaller
+    | ChooseImage
+    | GotFile File
+    | GotUrl String
 
 
 type Scene
@@ -173,6 +179,7 @@ update msg model =
                     , userSize = config.defaultSize
                     , zoomLevel = config.defaultZoomLevel
                     , fontLevel = config.defaultZoomLevel
+                    , imageUrl = Nothing
                     }
                 )
 
@@ -225,6 +232,21 @@ update msg model =
                         |> clamp config.minZoomLevel config.maxZoomLevel
             in
             ( { drawingModel | fontLevel = newFontLevel } |> Ready
+            , Cmd.none
+            )
+
+        ( _, ChooseImage ) ->
+            ( model
+            , Select.file [ "image/*" ] GotFile
+            )
+
+        ( _, GotFile file ) ->
+            ( model
+            , File.toUrl file |> Task.perform GotUrl
+            )
+
+        ( Ready drawingModel, GotUrl url ) ->
+            ( { drawingModel | imageUrl = Just url } |> Ready
             , Cmd.none
             )
 
@@ -316,7 +338,7 @@ global =
         [ Css.pct 100 |> Css.height ]
     , Css.Global.body
         [ Css.pct 100 |> Css.height ]
-    , Css.Global.id "post-it-note"
+    , Css.Global.id "image-element"
         [ Css.pct 100 |> Css.width
         , Css.pct 100 |> Css.height
         , Css.backgroundColor (Css.rgb 225 225 20)
@@ -347,34 +369,6 @@ global =
     ]
 
 
-css : String
-css =
-    """
-.rte-main {
-    outline: none;
-}
-
-.rte-hide-caret {
-    caret-color: transparent;
-}
-
-/*
- * Workaround for https://github.com/mweiss/elm-rte-toolkit/issues/16, iOS has issues
- * changing caret color on elements that are already selected.
- */
-@supports (-webkit-touch-callout: none) {
-    .rte-hide-caret {
-        caret-color: auto;
-    }
-}
-
-.rte-main p {
-    margin-bottom: 0.5em;
-    margin-top: 0.5em;
-}    
-    """
-
-
 
 -- View
 
@@ -383,8 +377,7 @@ view : Model -> Browser.Document Msg
 view model =
     { title = "SVG Text Editing Example"
     , body =
-        [ H.node "style" [] [ H.text css ]
-        , Css.Global.global global |> HS.toUnstyled
+        [ Css.Global.global global |> HS.toUnstyled
         , body model
         ]
     }
@@ -410,7 +403,8 @@ fullBody model =
                 , HA.style "height" "100%"
                 , HA.style "overflow" "hidden"
                 ]
-                [ diagram drawing
+                [ topMenu
+                , diagram drawing
                 ]
 
         ResizingPostIt _ _ drawing ->
@@ -419,11 +413,27 @@ fullBody model =
                 , HA.style "height" "100%"
                 , HA.style "overflow" "hidden"
                 ]
-                [ diagram drawing
+                [ topMenu
+                , diagram drawing
                 ]
 
         _ ->
             H.div [] []
+
+
+topMenu : Html Msg
+topMenu =
+    HS.div
+        [ HSA.id "top-menu"
+        , HSA.css [ Css.px 40 |> Css.height ]
+        ]
+        [ HS.button
+            [ HSA.css [ Css.px 40 |> Css.height ]
+            , HSE.onClick ChooseImage
+            ]
+            [ HS.text "Choose Image..." ]
+        ]
+        |> HS.toUnstyled
 
 
 diagram : DrawingModel -> Html Msg
@@ -446,16 +456,18 @@ diagram diag =
         , SvgAttr.viewBox (round x |> toFloat)
             (round y |> toFloat)
             (round w |> toFloat)
-            (round h |> toFloat)
+            (round (h - 40) |> toFloat)
         , SvgCore.svgNamespace
         , SvgAttr.shapeRendering RenderGeometricPrecision
         ]
         [ Svg.g
             []
-            [ background diag
-            , embeddedImage diag
-            , lowerControlBar diag
-            ]
+            ([ background diag |> Just
+             , embeddedImage diag
+             , lowerControlBar diag |> Just
+             ]
+                |> List.filterMap identity
+            )
             |> Geometry.Svg.at pixelsPerUnit
         ]
 
@@ -486,23 +498,27 @@ background { frame } =
         bgArea
 
 
-embeddedImage : DrawingModel -> Svg Msg
+embeddedImage : DrawingModel -> Maybe (Svg Msg)
 embeddedImage model =
     let
         { x, y, w, h } =
             rectToXywh model.postIt
     in
-    SvgCore.foreignObject
-        [ InPx.x x
-        , InPx.y y
-        , InPx.width w
-        , InPx.height h
-        ]
-        [ H.div
-            [ HA.id "post-it-note" ]
-            [ imageContent model
-            ]
-        ]
+    Maybe.map
+        (\imageUrl ->
+            Svg.image
+                [ InPx.x x
+                , InPx.y y
+                , InPx.width w
+                , InPx.height h
+                , SvgAttr.href imageUrl
+
+                --, SvgAttr.preserveAspectRatio AlignNone Slice
+                , SvgAttr.preserveAspectRatio (Align ScaleMid ScaleMid) Meet
+                ]
+                []
+        )
+        model.imageUrl
 
 
 lowerControlBar : DrawingModel -> Svg Msg
@@ -522,49 +538,13 @@ lowerControlBar { postIt } =
     Svg.g
         [ HA.id "resize-control" ]
         [ Geometry.Svg.rectangle2d
-            [ SvgAttr.fill <| Paint (Color.rgb255 200 200 20)
+            [ SvgAttr.fill <| Paint (Color.rgb255 200 200 200)
             , SvgAttr.fillOpacity <| Opacity 0.8
             , InPx.strokeWidth 0
             , HE.on "mousedown" (mousePosDecoder |> Decode.map PostItResize)
             ]
             control
         ]
-
-
-
--- Image rendering
-
-
-imageContent : DrawingModel -> Html Msg
-imageContent model =
-    let
-        scaleFactor =
-            Array.get model.fontLevel config.zoomLevels |> Maybe.withDefault 1.0
-    in
-    HS.node "elm-resize"
-        [ HSA.css
-            [ config.lineHeight * scaleFactor |> Css.px |> Css.lineHeight
-            , config.fontSize * scaleFactor |> Css.px |> Css.fontSize
-            ]
-        , HSA.id "content-main"
-        , resizeDecoder
-            |> Decode.map EditorResize
-            |> Decode.map (\val -> ( val, True ))
-            |> HSE.stopPropagationOn "resize"
-        ]
-        []
-        |> HS.toUnstyled
-
-
-
--- Resize Events
-
-
-resizeDecoder : Decoder VScreen
-resizeDecoder =
-    Decode.succeed Vector2d.pixels
-        |> DE.andMap (Decode.at [ "detail", "w" ] Decode.float)
-        |> DE.andMap (Decode.at [ "detail", "h" ] Decode.float)
 
 
 
