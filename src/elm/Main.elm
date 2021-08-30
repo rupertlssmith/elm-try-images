@@ -22,7 +22,6 @@ import Pixels exposing (Pixels)
 import Point2d exposing (Point2d)
 import Quantity exposing (Quantity, Unitless)
 import Rectangle2d exposing (Rectangle2d)
-import Sticky.Editor as Editor
 import Task
 import TypedSvg as Svg
 import TypedSvg.Attributes as SvgAttr
@@ -88,13 +87,11 @@ type alias DrawingModel =
     , userSize : VScene
     , zoomLevel : Int
     , fontLevel : Int
-    , editor : Editor.Model
     }
 
 
 type Msg
-    = EditorMsg Editor.Msg
-    | WindowSize VScreen
+    = WindowSize VScreen
     | EditorResize VScreen
     | Zoom WheelEvent
     | PostItResize PScreen
@@ -162,20 +159,6 @@ noop model =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case ( model, Debug.log "msg" msg ) of
-        ( Ready drawingModel, EditorMsg editorMsg ) ->
-            let
-                editorUpdate =
-                    Update2.lift
-                        .editor
-                        (\x m -> { m | editor = x })
-                        EditorMsg
-                        Editor.update
-                        editorMsg
-            in
-            editorUpdate drawingModel
-                |> Tuple.mapFirst Ready
-                |> Tuple.mapSecond (always Cmd.none)
-
         ( SizingWindow, WindowSize windowSize ) ->
             noop
                 (Ready
@@ -190,7 +173,6 @@ update msg model =
                     , userSize = config.defaultSize
                     , zoomLevel = config.defaultZoomLevel
                     , fontLevel = config.defaultZoomLevel
-                    , editor = Editor.init
                     }
                 )
 
@@ -423,11 +405,6 @@ fullBody : Model -> Html Msg
 fullBody model =
     case model of
         Ready drawing ->
-            let
-                _ =
-                    Editor.getControlContext drawing.editor
-                        |> Debug.log "controlState"
-            in
             H.div
                 [ HA.style "width" "100%"
                 , HA.style "height" "100%"
@@ -476,7 +453,7 @@ diagram diag =
         [ Svg.g
             []
             [ background diag
-            , editableTextForeignObject diag
+            , embeddedImage diag
             , lowerControlBar diag
             ]
             |> Geometry.Svg.at pixelsPerUnit
@@ -509,8 +486,8 @@ background { frame } =
         bgArea
 
 
-editableTextForeignObject : DrawingModel -> Svg Msg
-editableTextForeignObject model =
+embeddedImage : DrawingModel -> Svg Msg
+embeddedImage model =
     let
         { x, y, w, h } =
             rectToXywh model.postIt
@@ -523,7 +500,7 @@ editableTextForeignObject model =
         ]
         [ H.div
             [ HA.id "post-it-note" ]
-            [ editableContent model
+            [ imageContent model
             ]
         ]
 
@@ -555,11 +532,11 @@ lowerControlBar { postIt } =
 
 
 
--- contenteditable stuff
+-- Image rendering
 
 
-editableContent : DrawingModel -> Html Msg
-editableContent model =
+imageContent : DrawingModel -> Html Msg
+imageContent model =
     let
         scaleFactor =
             Array.get model.fontLevel config.zoomLevels |> Maybe.withDefault 1.0
@@ -570,26 +547,12 @@ editableContent model =
             , config.fontSize * scaleFactor |> Css.px |> Css.fontSize
             ]
         , HSA.id "content-main"
-
-        --, HSA.contenteditable True
         , resizeDecoder
             |> Decode.map EditorResize
             |> Decode.map (\val -> ( val, True ))
             |> HSE.stopPropagationOn "resize"
         ]
-        [ H.map EditorMsg (Editor.view model.editor) |> HS.fromUnstyled
-
-        --  HS.node "elm-editable"
-        --     [ HSA.attribute "spellcheck" "false"
-        --     , HSA.attribute "autocorrect" "off"
-        --     , HSA.attribute "autocapitalize" "off"
-        --     ]
-        --     [ HS.div [] [ HS.text "Editable Post-It Note" ]
-        --     , HS.node "selection-handler"
-        --         []
-        --         []
-        --     ]
-        ]
+        []
         |> HS.toUnstyled
 
 
