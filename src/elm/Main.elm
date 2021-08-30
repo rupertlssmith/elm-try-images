@@ -90,6 +90,7 @@ type alias DrawingModel =
     , zoomLevel : Int
     , fontLevel : Int
     , imageUrl : Maybe String
+    , preserveAspect : Bool
     }
 
 
@@ -105,6 +106,7 @@ type Msg
     | ChooseImage
     | GotFile File
     | GotUrl String
+    | PreserveAspect Bool
 
 
 type Scene
@@ -180,6 +182,7 @@ update msg model =
                     , zoomLevel = config.defaultZoomLevel
                     , fontLevel = config.defaultZoomLevel
                     , imageUrl = Nothing
+                    , preserveAspect = True
                     }
                 )
 
@@ -247,6 +250,11 @@ update msg model =
 
         ( Ready drawingModel, GotUrl url ) ->
             ( { drawingModel | imageUrl = Just url } |> Ready
+            , Cmd.none
+            )
+
+        ( Ready drawingModel, PreserveAspect val ) ->
+            ( { drawingModel | preserveAspect = val } |> Ready
             , Cmd.none
             )
 
@@ -431,7 +439,19 @@ topMenu =
             [ HSA.css [ Css.px 40 |> Css.height ]
             , HSE.onClick ChooseImage
             ]
-            [ HS.text "Choose Image..." ]
+            [ HS.text "Choose Image..."
+            ]
+        , HS.button
+            [ HSA.css [ Css.px 40 |> Css.height ]
+            , HSE.onClick (PreserveAspect True)
+            ]
+            [ HS.text "Preserve"
+            ]
+        , HS.button
+            [ HSA.css [ Css.px 40 |> Css.height ]
+            , HSE.onClick (PreserveAspect False)
+            ]
+            [ HS.text "Scale" ]
         ]
         |> HS.toUnstyled
 
@@ -512,9 +532,11 @@ embeddedImage model =
                 , InPx.width w
                 , InPx.height h
                 , SvgAttr.href imageUrl
+                , if model.preserveAspect then
+                    SvgAttr.preserveAspectRatio (Align ScaleMid ScaleMid) Meet
 
-                --, SvgAttr.preserveAspectRatio AlignNone Slice
-                , SvgAttr.preserveAspectRatio (Align ScaleMid ScaleMid) Meet
+                  else
+                    SvgAttr.preserveAspectRatio AlignNone Slice
                 ]
                 []
         )
