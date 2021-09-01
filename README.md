@@ -1,3 +1,3 @@
-# elm-input-spike
+# elm-try-images
 
-Figuring out what input method works best for text editing in Elm.
+Try embedded images on an SVG canvas.
